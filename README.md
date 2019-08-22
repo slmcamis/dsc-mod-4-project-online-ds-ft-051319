@@ -21,4 +21,6 @@ I will briefly outline the methodology that I followed for this project. The sam
 
 # Results
 
-<img src='images/DC_best_zipcodes.png'>
+<img src='images\best_roi_results.png'>
+
+<img src='images\DC_best_zipcodes.png'>
