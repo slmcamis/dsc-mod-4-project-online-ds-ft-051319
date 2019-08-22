@@ -6,6 +6,8 @@ For this project, I was tasked with identifying the 5 best zip codes for investm
 
 # Methodology 
 
+<h ref='DC_Zipcode_Analysis.ipynb'>
+
 I will briefly outline the methodology that I followed for this project. The same methodology can be used with the provided functions for analysis on any desired region. 
 
 * Load dataset and isolate desired region
