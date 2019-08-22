@@ -1,350 +1,169 @@
+# Imports
+
 import pandas as pd
 import numpy as np
-import matplotlib
+import random
+random.seed(42)
+
+#Suppress scientific notation
+pd.options.display.float_format = '{:.3f}'.format
+
+# Visualizations
 import matplotlib.pyplot as plt
-import statsmodels.api as sm
-import itertools
-from statsmodels.tsa.stattools import adfuller
+#%matplotlib inline
+import seaborn; seaborn.set()
 from statsmodels.tsa.seasonal import seasonal_decompose
+
+# Modeling
+import statsmodels.api as sm
+from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import TimeSeriesSplit
+import statsmodels.tsa.api as smt
+import scipy.stats as scs
+
+# Progress bars
+import time
+from tqdm import tqdm
+
+# Remove warnings
 import sys
 import warnings
-
 if not sys.warnoptions:
     warnings.simplefilter("ignore")
-
+    
+    
+    
+    
+# Functions    
+    
+# Customize dataset in one line
 def get_df(df, zipcode=None, city=None, state_initials=None, metro=None, county=None, start=None, end=None):
-    """
+    '''
     Input: 
+    df: dataframe with format from 'zillow_data.csv' 
+    zipcode: int, 5 digits
+    city: string
     state_initials: string, 2 capital letters
+    metro: string
+    county: string
+    start: string, date format 'YYYY-MM'
+    end: string, date format 'YYYY-MM'
     
     Returns:
-    dataframe of zipcodes in the given state.
-    """
-    data = df
-    
-    if zipcode != None:
+    Dataframe of given location parameters and start/end dates
+    '''
+    data = df.copy()
+    #Find specified location
+    if zipcode:
         data = data.loc[(df.RegionName == zipcode)]
-    if city != None:
+    if city:
         data = data.loc[(df.City == city)]
-    if state_initials != None:
+    if state_initials:
         data = data.loc[(df.State == state_initials)]
-    if metro != None: 
+    if metro: 
         data = data.loc[(df.Metro == metro)]
-    if county != None:
+    if county:
         data = data.loc[(df.CountyName == county)]
-
+    #Drop unnecessary columns
     data.drop(columns=['RegionID', 'SizeRank'], inplace=True)
-    #data.set_index('RegionName', inplace=True)
+    #Split dataframe into location information and house values
     head = data.iloc[:,:5]
     tail = data.iloc[:,5:]
-    
-    if start != None:
+    #Limit time range to given start/end dates
+    if start:
+        #Get index of start date
         i = tail.columns.get_loc(start)
     else:
         i = None
-    if end != None:
+    if end:
+        #Get index of end date
         j = tail.columns.get_loc(end) + 1
     else:
         j = None
+    #Slice tail with given start/end indexes
     tail = tail.iloc[:,i:j]
-    
+    #Combine head and tail
     new_df = pd.concat([head, tail], axis=1)
+    #Set zipcode as index
     new_df.set_index('RegionName', inplace=True)
-    
     return new_df
 
+# Convert dataframe to a usable format for time series analysis
 def make_time_series(df):
+    '''
+    Input:
+    Dataframe with format from 'zillow_data.csv' 
+    
+    Return:
+    Time series format with 
+    index set as Month and 
+    columns for each zipcode in df
+    '''
     ts = pd.DataFrame()
+    #Set column Month to dates from column names in df, convert to datetime
     ts['Month'] = pd.to_datetime(df.columns.values[4:], format='%Y-%m')
     for zipcode in df.index:
+        #For each zipcode, find all the housing values
         row = df[df.index==zipcode].iloc[:,4:]
+        #Make column for each zipcode with housing values
         ts[zipcode] = row.values[0]
     ts.set_index('Month',inplace=True)
     return ts
 
-def decompose_time_series(ts):
-    decomposition = seasonal_decompose(ts)
+# Plot timeseries of house value by zipcode
+def plot_time_series(ts, region_name=None, line=True, boxplot=True, figsize=(12,8)):
+    '''
+    Plot line graph and boxplot of time series region
+    
+    Input:
+    ts: time series format
+    region_name: string, name of target region
+    line: boolean, plot line graph
+    boxplot: boolean, plot boxplot
+    figsize: default (12,8)
+    '''
+    if line:
+        # Generate line graph for each zipcode
+        ts.plot(figsize=figsize)
+        if region_name:
+            plt.title("Median Home Value by Zip Code in {}".format(region_name))
+        else:
+            plt.title("Median Home Value")
+        plt.show()
+
+    if boxplot:
+        # Generate a box and whiskers plot for each zipcode
+        ts.boxplot(figsize = figsize)
+        if region_name:
+            plt.title("Median Home Value by Zip Code in {}".format(region_name))
+        else:
+            plt.title("Median Home Value")
+        plt.show()
+
+def decompose_time_series(ts, figsize=(12,4), mean=False):
+    if mean==True:
+        decomposition = seasonal_decompose(ts.mean(axis=1))
+    else:
+        decomposition = seasonal_decompose(ts)
 
     trend = decomposition.trend
     seasonal = decomposition.seasonal
     residual = decomposition.resid
 
-    trend.plot(figsize=(20,4),legend=True,title='Trend')
-    plt.title("Trend",{'size':22})
-    plt.xlabel("Year",{'size':22})
-    plt.legend(loc='lower left')
+    trend.plot(figsize=figsize)
+    plt.title("Trend")
+    plt.xlabel("Year")
     plt.show()
 
-    seasonal.plot(figsize=(20,4),legend=True,title='Seasonality')
-    plt.title("Seasonality",{'size':22})
-    plt.xlabel("Year",{'size':22})
-    plt.legend(loc='lower left')
+    seasonal.plot(figsize=figsize)
+    plt.title("Seasonality")
+    plt.xlabel("Year")
     plt.show()
 
-    residual.plot(figsize=(20,4),legend=True,title='Residual')
-    plt.title("Residual",{'size':22})
-    plt.xlabel("Year",{'size':22})
-    plt.legend(loc='lower left')
+    residual.plot(figsize=figsize)
+    plt.title("Residual")
+    plt.xlabel("Year")
     plt.show()
-
-def melt_data(df, start_index=0):
-    """
-    Input zipcode dataframe
-    Converts from wide format to long format
-    For use with time series modeling
-    """
-    melted = pd.melt(df, id_vars=['RegionID','RegionName', 'City', 'State', 'Metro', 'CountyName', 'SizeRank'], 
-                     var_name='Time')
-    melted['Time'] = pd.to_datetime(melted['Time'], infer_datetime_format=True)
-    melted = melted.dropna(subset=['value'])
-    return melted.groupby('Time').aggregate({'value':'mean'})[start_index:]
-
-def plot_time_series(df, name=None, legend=None):
-    # Instantiate a figure object. 
-    plt.figure()
-    if not legend:
-        legend = list(df.columns)
-    # Enumerate through each row in the dataframe passed in. Each row is a different zipcode.
-    for ind, row in df.iterrows():
-        # Get the median housing value data for the date ranges we want and store in a Series object
-        data = pd.Series(row.iloc[7:])
-        # Set the appropriate datetimes for data as the index for our data series
-        data.index = pd.to_datetime(df.columns[7:])
-        # Plot data for current zipcode on figure we instantiated on line 4. Set xticks to corresponding datetimes
-        # Also make the figure large, so that we can read it more easily
-        ax = data.plot(figsize=(20, 10), xticks=df.columns[7:])
-        # add a label
-        plt.ylabel("Median House Values")
-        # let matplootlib autoformat the datetimes for the xticks
-        plt.gcf().autofmt_xdate()
-        # If name of city was provided, use it to set title of plot
-        if name:
-            plt.title("Median Home Value by Zip Code in {} from 1997-2013".format(name))
-        else:
-            plt.title("Median Home Value, 1997-2013")
-    plt.legend(legend)        
-    plt.show()
-
-
-def stationarity_check(df, zipcode, threshold=.01):
-    """
-    p-value > 0.05: Fail to reject the null hypothesis, the data is non-stationary.
-    p-value <= 0.05: Reject the null hypothesis, the data is stationary.
-    """
-    # Get time series
-    TS = df[zipcode]
-
-    # Calculate rolling statistics
-    rolmean = TS.rolling(window = 8, center = False).mean()
-    rolstd = TS.rolling(window = 8, center = False).std()
-    
-    # Perform the Dickey Fuller Test
-    dftest = adfuller(TS)
-    
-    if dftest[1] < threshold:
-        #Plot rolling statistics:
-        fig = plt.figure(figsize=(12,6))
-        orig = plt.plot(TS, color='blue',label='Original')
-        mean = plt.plot(rolmean, color='red', label='Rolling Mean')
-        std = plt.plot(rolstd, color='black', label = 'Rolling Std')
-        plt.legend(loc='best')
-        plt.title('Rolling Mean & Standard Deviation')
-        plt.show(block=False)
-        print('Reject the null hypothesis, the data is stationary.')
-    else:
-        print('Fail to reject the null hypothesis, the data is non-stationary.')
-    
-    # Print Dickey-Fuller test results
-    print ('Results of Dickey-Fuller Test:')
-
-    dfoutput = pd.Series(dftest[0:4], index=['Test Statistic','p-value','#Lags Used','Number of Observations Used'])
-    for key,value in dftest[4].items():
-        dfoutput['Critical Value (%s)'%key] = value
-    print('p-value = {}'.format(dfoutput[1]))
-    
-    return dftest[1]
-
-
-
-def make_stationary(df, threshold=.01):
-    d = 0
-    for i in range(0,len(df)):
-        print('d=', d)
-        data_diff = df.diff(periods=i).dropna()
-        dftest = stationarity_check(data_diff)
-        if dftest < threshold:
-            break
-        else:
-            d+=1
-    print('d=', d)
-    return d
-
-
-#function to fit a SARIMAX model
-def run_SARIMAX(ts,pdq,pdqs): 
-    '''
-    Fits a Statsmodels SARIMAX Time Series Model.
-    
-    Arguments:
-         ts    = The time series being modeled.
-         pdq   = list containing the p,d,and q values for the SARIMAX function.
-         pdqs  = list containing the seasonal p,d and q values along with seasonal 
-                 shift amount for the SARIMAX function.
-    
-    Return Value:
-         Dictionary containing {model: model, terms: pdq, seasonal terms: pdqs, AIC: model AIC} values.
-         Return AIC of 99999 and model=None indicates that the SARIMAX failed to execute.
-    '''
-    try:
-        mod = sm.tsa.statespace.SARIMAX(ts,
-                                       order=pdq,
-                                       seasonal_order=pdqs,
-                                       enforce_stationarity=False,
-                                       enforce_invertibility=False)
-        output = mod.fit()
-        return {'model':output,'terms':pdq,'seasonal terms':pdqs,'AIC':output.aic}
-    
-    except:
-        return {'model':None,'terms':pdq,'seasonal terms':pdqs,'AIC':99999}
-
-    
-def get_SARIMA_parameters(ts,p,d,q,sp,sd,sq,s):
-    '''
-    Fits a Statsmodels SARIMAX Time Series Model for every combination of
-    p,d,q and seasonal p,d,q values provided.
-    
-    Arguments:
-         ts = The time series being modeled.
-         p  = list of autoregressive terms to test
-         d  = list of differencing parameter terms to test
-         q  = list of moving average terms to test
-         sp = list of seasonal autoregressive terms to test
-         sd = list of seasonal differencing terms to test
-         sq = list of seasonal moving average terms to test
-         s  = list of seasonal durations to test
-         
-    Return Value:
-         List of dictionaries containing (terms: pdq, seasonal terms: pdqs, AIC: model AIC) values.
-         The list is sorted by lowest AIC to highest. 
-         AIC of 99999 indicates that the SARIMAX failed to execute.
-    '''
-    
-    #Make combinations of pdq and sp,sd,sq,s for the model
-    combos = list(itertools.product(p, d, q))
-    combos_seasonal = list(itertools.product(sp, sd, sq, s))
-    print('total combos = ',len(combos) * len(combos_seasonal))
-    
-    #results will be appended to this empty list
-    results = []
-    
-    #iterate through every combination, run a SARIMAX model and store the AIC value
-    for combo in combos:
-        for combo_season in combos_seasonal:
-            result = run_SARIMAX(ts,combo,combo_season)
-            #remove model because this function is only for parameter selection
-            del result['model']
-            results.append(result)
-    
-    #return the list sorted by AIC value
-    return sorted(results,key=lambda x: x['AIC'])
-
-
-
-def plot_prediction(ts,model,date,dynamic=False):
-    '''
-    Plot a prediction for the time series and model provided.
-    
-    Arguments:
-         ts    = The time series being plotted.
-         model = The model being used to make predictions.
-         date  = The date after which predictions will be plotted
-         dynamic = If True, use dynamic predictions from date provided
-         
-    Return Value:
-         RMSE for the predicitons for the forecast
-    
-    '''
-    pred = model.get_prediction(start=pd.to_datetime(date),dynamic=dynamic,full_results=True)
-    pred_conf = pred.conf_int()
-    ax = ts.plot(label='observed', figsize=(20,5))
-    if dynamic:
-        label='dynamic prediction from {}'.format(date)
-    else:
-        label='one-step-ahead prediction'
-    pred.predicted_mean.plot(ax=ax, label=label,color='darkorange',alpha=0.9)
-    ax.fill_between(pred_conf.index,pred_conf.iloc[:,0],pred_conf.iloc[:,1],color='b',alpha=0.1)
-    plt.legend(loc='upper left')
-    forecasted = pred.predicted_mean
-    truth = ts[date :]
-    RMSE = np.sqrt(np.mean((forecasted-truth)**2))
-    print("RMSE: ",RMSE)
-    return RMSE
-
-
-def get_forecast(ts,model,steps,plot=False):
-    '''
-    Get an ROI 1-yr and 5-yr using a forcast with the time seriex and model provided.
-    
-    Arguments:
-         ts    = The time series being forecasted.
-         model = The model being used to make a forecast.
-         steps = The number of steps ahead to forecast.
-         plot  = If True, plot the forecast
-         
-    Return Value:
-         Dictionary containing 1-yr and 5-yr ROI values.  
-    '''
-    prediction = model.get_forecast(steps=steps)
-    pred_conf = prediction.conf_int()
-    
-    if plot:    
-        #Plot future prediction with confidence interval
-        ax = ts.plot(label='observed',figsize=(20,5))
-        prediction.predicted_mean.plot(ax=ax,label='forecast')
-        ax.fill_between(pred_conf.index,pred_conf.iloc[:,0],pred_conf.iloc[:,1],color='b',alpha=0.1)
-        plt.legend(loc='upper left')
-        plt.show()
-    
-    #At least 60 steps are required in order to calculate the 5-yr ROI
-    if steps <= 60:
-        prediction = model.get_forecast(steps=60)
-    
-    #Calculate 1yr and 5yr ROIs
-    last_val = ts[-1]
-    roi_1yr = round( (prediction.predicted_mean[11] - last_val)/last_val , 3)
-    roi_5yr = round( (prediction.predicted_mean[59] - last_val)/last_val , 3)
-    
-    return {'ROI_1yr':roi_1yr, 'ROI_5yr': roi_5yr}
-
-
-def plot_forecasts(df, model_dicts, steps, title=None):
-    '''
-    Plot forecasts for all zipcodes in results dictionary.
-    
-    Arguments:
-         df         = The dataframe containing time series data with zipcodes as column names.
-         model_dict = List containing dictionaries with models for each zipcode.
-         steps      = The number of steps ahead to forecast.
-         
-    Return Value:
-         A plot with all zipcodes in model_dicts  
-    '''
-    
-    for item in model_dicts:
-        zipcode = item['zipcode']
-        label = f"{item['city']} {zipcode}"
-        model = item['model']
-        ts = df[zipcode]
-        prediction = model.get_forecast(steps=steps)
-        all_data = pd.concat([ts,prediction.predicted_mean],axis=0)
-        ax = all_data.plot(label=label,figsize=(20,5))
-    
-    plt.axvline(x=df.index[-1], color='black', linestyle=':')
-    plt.legend(loc='upper left')
-    plt.title(title)
-    plt.show()
-    return
-
 
 def pacf_plot(ts,lags=100):
     fig, ax = plt.subplots(figsize=(15,5))
@@ -356,3 +175,306 @@ def acf_plot(ts,lags=100):
     fig, ax = plt.subplots(figsize=(15,5))
     sm.graphics.tsa.plot_acf(ts, ax=ax, lags=lags)
     return
+
+def train_test_split(ts, len_test):
+    train, test = ts[:-len_test], ts[-len_test:]
+    print("Train Test Split Complete \nLength of Train: {} \tLength of Test: {}".format(len(train), len(test)))
+    return train, test
+
+# create a list of parameters to try
+def param_combinations(param_range=3, differencing_range=2, seasonal=[0,12], trend=[None,'t','ct']):
+    '''
+    Creates combinations of parameters for SARIMAX modeling
+    
+    Input: 
+        param_range: int, range for p, q, P, Q (default 3=[0,1,2])
+        differencing_range: int, range for d and D (default 2=[0,1])
+        seasonal: list, default [0,12]
+        trend: list, default [None,'t','ct']
+            None - SARIMAX default
+            't' - linear trend
+            'ct' - linear trend with constant
+            *Note: to use only None, enter [None]
+        
+    Return:
+        list in this format: [(p,d,q), (P,D,Q,s), t]
+    '''
+    p = q = P = Q = range(param_range) #default 3 [0,1,2]
+    d = D = range(differencing_range) #default 2 [0,1]
+    s = seasonal #default [0,12]
+    t = trend #default [None,'t','ct']
+    params = []
+    # create config instances
+    for p_ in tqdm(p, desc='Making parameter combinations', leave=False):
+        for d_ in d:
+            for q_ in q:
+                for t_ in t:
+                    for P_ in P:
+                        for D_ in D:
+                            for Q_ in Q:
+                                for s_ in s:
+                                    combo = [(p_,d_,q_), (P_,D_,Q_,s_), t_]
+                                    params.append(combo)
+    return params
+
+# root mean squared error or rmse
+def measure_rmse(true_values, predictions):
+    return np.sqrt(mean_squared_error(true_values, predictions))
+
+def sarimax(ts, order, sorder, trend=None):
+    '''
+    Fits a Statsmodels SARIMAX Time Series Model.
+    
+    Inputs:
+        ts: time series format
+        order: list containing the p,d,and q values for the SARIMAX function.
+        sorder: list containing the seasonal p,d and q values along with seasonal 
+            shift amount for the SARIMAX function
+        trend: string, options=[None, 'n', 'c', 'ct', 't']
+    
+    Return:
+        fitted model
+    '''
+    #Run and fit SARIMAX model with given parameters
+    model = sm.tsa.statespace.SARIMAX(ts, order=order, seasonal_order=sorder, trend=trend, 
+                                      enforce_stationarity=False, 
+                                      enforce_invertibility=False)
+    fit_model = model.fit(disp=False)
+    return fit_model
+
+def cross_validation_rmse(ts, order, sorder, trend=None, n_splits=4):
+    '''
+    Uses time series cross validation (TimeSeriesSplit) of n_splits.
+    Calculates RMSE for each split
+    *Remember to reserve a portion of the data for final model evaluation
+    
+    Input:
+        ts - full time series
+        order - ints, (#,#,#)
+        sorder - ints, (#,#,#,#)
+        trend - string
+        n_splits - number of cross validation splits (default 4)
+        
+    Returns:
+        Average root mean squared error of cross validations 
+    '''
+    #Initialize TimeSeriesSplit with n_splits (default 4)
+    tscv = TimeSeriesSplit(n_splits = n_splits)
+    #Create list for RMSE of each cross validation split
+    rmse = []
+    try:
+        #Use tscv to implement Forward Chaining Nested Cross Validation
+        for train_index, test_index in tscv.split(ts):
+            #Make train, test split for section
+            cv_train, cv_test = ts.iloc[train_index], ts.iloc[test_index]
+            #Run and fit model for section
+            model = sarimax(cv_train, order, sorder, trend)
+            #Get predictions from model for cv_test date range
+            predictions = model.predict(cv_test.index.values[0], cv_test.index.values[-1])
+            #Store true values for cv_test date range
+            true_values = cv_test.values
+            #Calculate RMSE and append to list
+            rmse.append(measure_rmse(true_values, predictions))
+        #Calculate average of RMSEs from cross validations
+        cv_rmse = round(sum(rmse)/n_splits,3)
+    except:
+        cv_rmse = np.nan
+    
+    return cv_rmse
+
+def results_dict(ts, order, sorder, trend):
+    cv_rmse = cross_validation_rmse(ts, order, sorder, trend)
+    model = sarimax(ts, order, sorder, trend)
+    aic = model.aic
+    bic = model.bic
+    dictionary = {'model':model,'order':order,'sorder':sorder,'trend':trend,
+                'AIC':aic,'BIC':bic, 'CVRMSE':cv_rmse}
+    return dictionary
+
+def results_dict(ts_all, order, sorder, trend):
+    train_test_split_test_split()
+    cv_rmse = cross_validation_rmse(ts, order, sorder, trend)
+    model = sarimax(ts, order, sorder, trend)
+    aic = model.aic
+    bic = model.bic
+    dictionary = {'model':model,'order':order,'sorder':sorder,'trend':trend,
+                'AIC':aic,'BIC':bic, 'CVRMSE':cv_rmse}
+    return dictionary
+
+def run_models_by_params(ts, param_combos):
+    '''
+    Function to run SARIMAX model with cross validation for all parameter combinations
+    for single time series
+    Input:
+        ts: single time series (training data)
+        param_combos: list of parameter combinations
+            format: order, sorder, trend
+            
+    '''
+    #Initialize list for results
+    results = []
+    #Iterate through parameters with progress baar
+    for param in tqdm(param_combos, desc='Running models with cross validation', leave=False):
+        #Separate parameters
+        order, sorder, trend = param
+        #Run model with cross validation
+        result = results_dict(ts, order, sorder, trend)
+        #Add dictionary of result to list
+        results.append(result)
+    #Convert list of dictionaries to dataframe
+    df = pd.DataFrame(results, columns=['model', 'order', 'sorder', 'trend', 'AIC', 'BIC', 'CVRMSE'])
+    return df
+
+def run_all_models(ts_all, param_combos):
+    '''
+    Function to iterate through zipcodes and run SARIMAX models with cross validation 
+    for all combinations of parameters
+    
+    Input:
+        ts - time series of region (training data)
+        param_combos - list of parameter combinations
+    '''
+    #Initialize list for rows
+    df_list = []
+    #Iterate through the columns in the time seres
+    for zipcode in tqdm(ts_all.columns, desc='Modeling zipcodes', leave=False):
+        #Sanity check
+        print(f'Running models for zipcode {zipcode}')
+        #Isolate the data for the zipcode
+        ts = ts_all[zipcode]
+        #Iterate through all param_combos using time series cross validation
+        #Stores row as dataframe with results of model
+        zip_df = run_models_by_params(ts, param_combos)
+        #Add column for zipcode to dataframe
+        zip_df.insert(0, 'zipcode', zipcode)
+        #Add row to df_list
+        df_list.append(zip_df)
+    #Combine zip_df into dataframe
+    df = pd.concat(df_list)
+    return df
+
+def sort_best_models(results_df, criterion, drop_duplicates=True):
+    '''
+    Input:
+        df - dataframe of all model results
+        criterion - string, column name to sort by
+        
+    Returns:
+        Dataframe of best model results for each zipcode
+    '''
+    df = results_df.copy()
+    #Drop nan values in CVRMSE columns
+    df.dropna(subset=['CVRMSE'], inplace=True)
+    #Sort values by given criterion
+    df.sort_values(criterion, ascending=True, inplace=True)
+    if drop_duplicates:
+        #Get top row for each zipcode
+        df.drop_duplicates(['zipcode'], inplace=True)
+    #Fill null values with None (affects trend)
+    df.fillna('None', inplace=True)
+    return df
+
+def extract_params(results_df, zipcode):
+    '''
+    Input:
+        best_results - Dataframe from running models
+        zipcode - int, 5 digits
+        
+    Returns:
+        order, seasonal_order, trend
+    '''
+    row = results_df.loc[results_df['zipcode']==zipcode]
+    order = (int(row['order'].values[0][1]),
+            int(row['order'].values[0][4]),
+            int(row['order'].values[0][7]))
+    sorder = (int(row['sorder'].values[0][1]),
+            int(row['sorder'].values[0][4]),
+            int(row['sorder'].values[0][7]),
+            int(row['sorder'].values[0][10:12]))
+    trend = str(row['trend'].values[0])    
+    #print(f'zipcode: {zipcode}, order: {order}, sorder: {sorder}, trend: {trend}')
+    
+    return order,sorder,trend
+
+def rmse_final(train, test, order, sorder, trend=None):
+    model = sm.tsa.statespace.SARIMAX(train, order=order, seasonal_order=sorder, trend=trend, 
+                                      enforce_stationarity=False, 
+                                      enforce_invertibility=False)
+    fit_model = model.fit(disp=False)
+    #Get predictions from model for test date range
+    predictions = fit_model.predict(test.index.values[0], test.index.values[-1])
+    #Store true values for test date range
+    true_values = test.values
+    #Calculate RMSE
+    rmse = measure_rmse(true_values, predictions)
+    return rmse
+
+def add_rmse_to_final_models(best_results, train, test):
+    #Add final RMSE for each model
+    rmse_list = []
+    best_results.dropna(subset=['CVRMSE'], inplace=True)
+    for zipcode in best_results.zipcode:
+        o,s,t = extract_params(best_results, zipcode)
+        rmse = rmse_final(train[zipcode], test[zipcode], o, s, None)
+        rmse_list.append(rmse)
+    best_results['RMSE'] = np.round(rmse_list,1)
+
+def plot_predictions(best_results_cvrmse, ts_all, start_test='2017-04', 
+                     start_pred='2017-06-01', end_pred=None, dynamic=False):
+    fig, axes = plt.subplots(nrows=9, ncols=2, figsize=(15,65))
+    axes_list = [item for sublist in axes for item in sublist] 
+    train, test = train_test_split(ts_all, 12)
+    for zipcode in best_results_cvrmse.zipcode:
+        ax = axes_list.pop(0)
+        order,sorder,trend = extract_params(best_results_cvrmse, zipcode)
+        output = sarimax(ts_all[zipcode], order, sorder)
+        pred = output.get_prediction(start=start_pred, end=end_pred, dynamic=dynamic)
+        pred_ci = pred.conf_int()
+        test[zipcode][start_test:].plot(label='Observed', ax=ax)
+        pred.predicted_mean.plot(ax=ax, label='One-step ahead Forecast', alpha=.7)
+
+        ax.fill_between(pred_ci.index,
+                        pred_ci.iloc[:, 0],
+                        pred_ci.iloc[:, 1], 
+                        color='k', alpha=.2)
+
+        ax.set_ylabel(f'Housing Value for {zipcode}')
+        ax.set_title(f'Model Validation for Zipcode {zipcode}')
+
+
+    # Now use the matplotlib .remove() method to 
+    # delete anything we didn't use
+    for ax in axes_list:
+        ax.remove()
+
+def plot_roi(best_results_cvrmse, ts_all):
+    fig, axes = plt.subplots(nrows=6, ncols=3, figsize=(15,36))
+    axes_list = [item for sublist in axes for item in sublist] 
+
+    for zipcode in best_results_cvrmse.zipcode:
+        ax = axes_list.pop(0)
+        ROI_1yr = 100 * (ts_all[zipcode].tshift(-12) / ts_all[zipcode] - 1)
+        ROI_1yr.plot(x='Year', y='ROI', label='1 Year ROI', ax=ax, legend=True)
+        ROI_2yr = 100 * (ts_all[zipcode].tshift(-24) / ts_all[zipcode] - 1)
+        ROI_2yr.plot(x='Year', y='ROI', label='2 Year ROI', ax=ax, legend=True)
+        ax.set_title(zipcode)
+        ax.axhline(c='black')
+        ax.tick_params(
+            which='both',
+            bottom='on',
+            left='on',
+            right='off',
+            top='off'
+        )
+        ax.set_ylim(-30, 70)
+        ax.set_ylabel('Return on Investment')
+        #ax.spines['left'].set_position('zero')
+
+        #ax.spines['top'].set_visible(False)
+        #ax.spines['right'].set_visible(False)
+
+
+    # Now use the matplotlib .remove() method to 
+    # delete anything we didn't use
+    for ax in axes_list:
+        ax.remove()
