@@ -6,7 +6,8 @@ For this project, I was tasked with identifying the 5 best zip codes for investm
 
 # Methodology 
 
-<h ref='DC_Zipcode_Analysis.ipynb'>
+<a href='DC_Zipcode_Analysis.ipynb'>DC Zipcode Analysis Notebook</a>
+<a href=https://docs.google.com/presentation/d/1-73HQuUa8xQMfJbmJ0aaUQO5ueFg79XBtxcC8s-Kokc/edit?usp=sharing>Presentation</a>
 
 I will briefly outline the methodology that I followed for this project. The same methodology can be used with the provided functions for analysis on any desired region. 
 
@@ -21,8 +22,20 @@ I will briefly outline the methodology that I followed for this project. The sam
 * Select and visualize best zip codes
 * Summary and future work
 
-# Results
+# Results and Recommendations
 
 <img src='images\best_roi_results.png'>
 
 <img src='images\DC_best_zipcodes.png'>
+
+* Invest in Southeast and Northeast quadrants of DC
+* Expand analysis region to include entire DMV area
+* Connect with local government concerning gentrification
+
+# Future Work
+
+* Continue to optimize models for more accurate predictions
+* Explore other evaluation metrics
+* Test functions on other regions
+
+
