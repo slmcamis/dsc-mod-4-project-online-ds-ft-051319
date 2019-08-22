@@ -7,7 +7,8 @@ For this project, I was tasked with identifying the 5 best zip codes for investm
 # Methodology 
 
 <a href='DC_Zipcode_Analysis.ipynb'>DC Zipcode Analysis Notebook</a>
-<a href=https://docs.google.com/presentation/d/1-73HQuUa8xQMfJbmJ0aaUQO5ueFg79XBtxcC8s-Kokc/edit?usp=sharing>Presentation</a>
+
+<a href="https://docs.google.com/presentation/d/1-73HQuUa8xQMfJbmJ0aaUQO5ueFg79XBtxcC8s-Kokc/edit?usp=sharing">Presentation</a>
 
 I will briefly outline the methodology that I followed for this project. The same methodology can be used with the provided functions for analysis on any desired region. 
 
